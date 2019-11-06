@@ -1,19 +1,16 @@
 
+
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerResponse;
-import io.vertx.core.json.Json;
+import io.vertx.core.json.JsonObject;
+
 import io.vertx.ext.web.Router;
-import io.vertx.ext.unit.Async;
-import io.vertx.ext.unit.TestContext;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
-import org.junit.Test;
 
-import java.net.http.HttpResponse;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.sql.*;
 
 public class ShoppingCartApp extends AbstractVerticle {
 
@@ -22,26 +19,38 @@ public class ShoppingCartApp extends AbstractVerticle {
         vertx.deployVerticle(new ShoppingCartApp());
     }
 
-    private Map<Integer, Product> cart = new LinkedHashMap<>();
 
-    private void getAll(RoutingContext routingContext){
+    public void getAll(RoutingContext routingContext){
+
         String results= "";
-        for(int key: cart.keySet()){
-            results += (cart.get(key).toString() + " ");
+        DBConnection dbcon = new DBConnection();
+        try {
+            results = dbcon.getAllFromDb();
+        } catch (SQLException e) {
+            e.printStackTrace();
         }
         routingContext.response()
                 .putHeader("content-type", "text/html")
-                .end("These items are in your cart: " + results);
+                .end("Your cart: " + results);
+                //.end("These items are in your cart: " + results);
     }
 
     public void addToCart(RoutingContext routingContext){
         if(routingContext.getBodyAsString() != null){
-            final Product product = Json.decodeValue(routingContext.getBodyAsString(), Product.class);
-            cart.put(product.getId(), product);
+            JsonObject product = routingContext.getBodyAsJson();
+            String name = product.getString("name");
+            int price = product.getInteger("price");
+            DBConnection dbcon = new DBConnection();
+            String response = "";
+            try {
+                response = dbcon.addToDb(name, price);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
             routingContext.response()
                     .setStatusCode(201)
                     .putHeader("content-type", "text/html")
-                    .end("You added an item to the cart: " + product.toString());
+                    .end(response);
         }
         else{
             routingContext.response()
@@ -49,6 +58,26 @@ public class ShoppingCartApp extends AbstractVerticle {
                     .putHeader("content-type", "text/html")
                     .end("body was null");
         }
+    }
+
+    private void deleteOne(RoutingContext routingContext) {
+        String id = routingContext.request().getParam("id");
+        String response = "";
+        if (id == null) {
+            routingContext.response().setStatusCode(400).end();
+        } else {
+            Integer itemid = Integer.valueOf(id);
+        DBConnection dbcon = new DBConnection();
+            try {
+                response = dbcon.deleteFromDb(itemid);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+        routingContext.response()
+                .setStatusCode(204)
+                .putHeader("content-type", "text/html")
+                .end(response);
     }
     @Override
     public void start(Future<Void> future){
@@ -63,11 +92,11 @@ public class ShoppingCartApp extends AbstractVerticle {
 
         router.route("/cart").handler(BodyHandler.create());
 
-        router.get("/cart/view").handler(this::getAll);
+        router.get("/cart").handler(this::getAll);
 
         router.post("/cart").handler(this::addToCart);
 
-        router.delete();
+        router.delete("/cart/:id").handler(this::deleteOne);
 
         vertx.createHttpServer()
                 .requestHandler(router::accept)
